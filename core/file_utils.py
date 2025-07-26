@@ -1,5 +1,9 @@
 import os
 import re
+import platform
+import subprocess
+from difflib import SequenceMatcher
+from collections import defaultdict
 from difflib import SequenceMatcher
 
 def extract_ignore_keywords(raw_input):
@@ -35,36 +39,64 @@ def collect_files(folder, max_depth, progress_callback=None):
             dirs[:] = []
             continue
         for f in files:
-            result.append((f, os.path.join(root, f)))
+            result.append((f, os.path.join(root, f), cur_depth))
             count += 1
             if progress_callback:
                 progress_callback(count, total)
         for d in dirs:
-            result.append((d, os.path.join(root, d)))
+            result.append((d, os.path.join(root, d), cur_depth))
             count += 1
             if progress_callback:
                 progress_callback(count, total)
     return result
 
-def build_duplicate_groups(entries, threshold, user_keywords):
-    normalized = {e[1]: normalize(e[0]) for e in entries}
-    groups = []
-    used = set()
-    for i, (name1, path1) in enumerate(entries):
-        if path1 in used:
-            continue
-        group = [(name1, path1)]
-        norm1 = normalized[path1]
-        for name2, path2 in entries[i+1:]:
-            if path2 in used:
+def open_file_location(path):
+    if platform.system() == "Windows":
+        if os.path.isdir(path):
+            os.startfile(path)
+        else:
+            subprocess.run(["explorer", "/select,", path])
+    elif platform.system() == "Darwin":
+        subprocess.run(["open", "-R", path])  # macOS
+    else:
+        subprocess.run(["xdg-open", os.path.dirname(path)])  # Linux
+
+def build_duplicate_groups(entries, threshold, user_keywords, target_depth=None):
+    # 如果有指定target_depth，就只筛选该层级的条目
+    if target_depth is not None:
+        entries = [e for e in entries if e[2] == target_depth]  # e[2]是层级
+
+    # 按文件夹分组
+    groups_by_folder = defaultdict(list)
+    for name, path, depth in entries:
+        folder = os.path.dirname(path)
+        groups_by_folder[folder].append((name, path))
+
+    all_groups = []
+
+    for folder, group_entries in groups_by_folder.items():
+        normalized = {e[1]: normalize(e[0]) for e in group_entries}
+        used = set()
+        folder_groups = []
+
+        for i, (name1, path1) in enumerate(group_entries):
+            if path1 in used:
                 continue
-            norm2 = normalized[path2]
-            if is_version_variant(name1, name2, user_keywords):
-                continue
-            if SequenceMatcher(None, norm1, norm2).ratio() >= threshold:
-                group.append((name2, path2))
-                used.add(path2)
-        if len(group) > 1:
-            used.update([p for _, p in group])
-            groups.append(group)
-    return groups
+            group = [(name1, path1)]
+            norm1 = normalized[path1]
+            for name2, path2 in group_entries[i+1:]:
+                if path2 in used:
+                    continue
+                norm2 = normalized[path2]
+                if is_version_variant(name1, name2, user_keywords):
+                    continue
+                if SequenceMatcher(None, norm1, norm2).ratio() >= threshold:
+                    group.append((name2, path2))
+                    used.add(path2)
+            if len(group) > 1:
+                used.update([p for _, p in group])
+                folder_groups.append(group)
+
+        all_groups.extend(folder_groups)
+
+    return all_groups

@@ -6,12 +6,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 # 从 core.file_utils 导入功能函数
-from core.file_utils import ( # pyright: ignore[reportMissingImports]
-    extract_ignore_keywords,
-    normalize,
-    is_version_variant,
+from core.file_utils import (
     collect_files,
     build_duplicate_groups,
+    extract_ignore_keywords,
+    normalize,
+    open_file_location
 )
 
 class DuplicateCheckerGUI:
@@ -50,6 +50,7 @@ class DuplicateCheckerGUI:
         tk.Button(btn_frame, text="开始检测", command=self.run_detection).pack(side='left', padx=5)
         tk.Button(btn_frame, text="导出报告", command=self.export_report).pack(side='left', padx=5)
         tk.Button(btn_frame, text="删除勾选项", command=self.delete_selected).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="打开所选位置", command=self.open_selected_location).pack(side='left', padx=5)
 
         self.progress = ttk.Progressbar(self.master, orient='horizontal', mode='determinate')
         self.progress.pack(fill='x', padx=10, pady=(0, 5))
@@ -91,6 +92,12 @@ class DuplicateCheckerGUI:
             percent = int((current / total) * 100)
             self.progress['value'] = percent
             self.master.update_idletasks()
+            
+    def show_context_menu(self, event, path):
+        menu = tk.Menu(self.master, tearoff=0)
+        menu.add_command(label="打开文件位置", command=lambda: open_file_location(path))
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
 
     def run_detection(self):
         self.result_text.configure(state='normal')
@@ -116,7 +123,8 @@ class DuplicateCheckerGUI:
             groups = build_duplicate_groups(
                 entries,
                 threshold=self.threshold_var.get(),
-                user_keywords=user_keywords
+                user_keywords=user_keywords,
+                target_depth=self.depth_var.get()
             )
             self.duplicate_groups = groups
 
@@ -131,6 +139,7 @@ class DuplicateCheckerGUI:
                         var = tk.BooleanVar()
                         cb = tk.Checkbutton(self.check_frame, text=path, variable=var, anchor='w', justify='left')
                         cb.pack(fill='x', anchor='w')
+                        cb.bind("<Button-3>", lambda e, p=path: self.show_context_menu(e, p))  # 添加右键菜单
                         self.checkbox_refs.append((var, path))
                         self.result_text.insert(tk.END, f"   • {name}\n")
                     self.result_text.insert(tk.END, "\n")
@@ -179,6 +188,13 @@ class DuplicateCheckerGUI:
             msg += f"\n失败 {len(failed)} 项：\n" + "\n".join(failed)
         messagebox.showinfo("删除结果", msg)
         self.run_detection()
+    def open_selected_location(self):
+        selected = [path for var, path in self.checkbox_refs if var.get()]
+        if not selected:
+            messagebox.showinfo("提示", "请先勾选至少一个项目。")
+            return
+        for path in selected:
+            open_file_location(path)  # 这里调用你导入的函数
 
 if __name__ == '__main__':
     root = tk.Tk()
